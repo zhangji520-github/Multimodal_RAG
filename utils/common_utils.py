@@ -73,10 +73,10 @@ def delete_directory_if_non_empty(dir_path):
 
 if __name__ == '__main__':
     # 使用示例
-    # file_path = "/home/user/documents/example.txt"
-    # print(get_filename(file_path))          # 输出: example.txt
-    # print(get_filename(file_path, False))  # 输出: example
+    file_path = "/home/user/documents/example.txt"
+    print(get_filename(file_path))          # 输出: example.txt
+    print(get_filename(file_path, False))  # 输出: example
 
     # 使用示例
-    directory_to_delete = "E:\\my_project\\graph_rag_demo\\output\\demo_pdf1"
-    delete_directory_if_non_empty(directory_to_delete)
+    # directory_to_delete = "E:\\my_project\\graph_rag_demo\\output\\demo_pdf1"
+    # delete_directory_if_non_empty(directory_to_delete)
