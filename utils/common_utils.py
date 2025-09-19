@@ -22,8 +22,12 @@ def get_sorted_md_files(input_dir: str) -> List[str]:
     按照页号，把所有的md文件排序。（xx_0.md, xx_1.md, xx_2.md, .... xx_12.md）
     获取指定目录下所有 .md 文件，并按照 _page_X 中的 X 数值排序
     """
-    # 获取所有 .md 文件
-    md_files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.endswith('.md')]
+    # 获取所有 .md 文件（排除 _nohf.md）
+    md_files = [
+        os.path.join(input_dir, f)
+        for f in os.listdir(input_dir)
+        if f.endswith('.md') and not f.endswith('_nohf.md')
+    ]
 
     # 定义排序 key 函数：提取 _page_ 后的数字
     def sort_key(file_path: str) -> int:
