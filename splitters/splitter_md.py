@@ -1,4 +1,6 @@
+import sys
 import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import base64
 from PIL import Image
 import io
@@ -11,8 +13,6 @@ import hashlib
 from typing import List
 from utils.common_utils import get_sorted_md_files
 from utils.log_utils import log
-
-
 
 
 
@@ -62,7 +62,7 @@ class MarkdownDirSplitter:
     def process_images(self, content: str, source: str) -> List[Document]:
         """
         处理Markdown中的base64图片
-        :param content:  Markdown 内容（字符串）就是警告md切割器之后的page_content
+        :param content:  Markdown 内容 字符串 就是md切割器之后的page_content
         :param source:  source 是当前正在处理的 Markdown 文件的路径（文件名或完整路径）
         
         """
@@ -156,8 +156,8 @@ class MarkdownDirSplitter:
         return final_docs
     
     def add_title_hierarchy(self, documents: List[Document], source_filename: str) -> List[Document]:
-        """为文档添加标题层级结构"""
-        current_titles = {1: "", 2: "", 3: ""}
+        """章节溯源"""
+        current_titles = {1: "", 2: "", 3: ""}        # current_titles 是一个状态记录器，表示“当前遍历到的文档块，所处的最新一级、二级、三级标题是什么”
         processed_docs = []
 
         for doc in documents:
@@ -175,9 +175,9 @@ class MarkdownDirSplitter:
             # 补充缺失的标题
             for level in range(1, 4):
                 header_key = f'Header {level}'
-                if header_key not in new_metadata:
+                if header_key not in new_metadata:    # 如果当前块的 metadata 里没有某个层级的标题（比如没有 Header 1），就从 current_titles 里补上。
                     new_metadata[header_key] = current_titles[level]
-                elif current_titles[level] != new_metadata[header_key]:
+                elif current_titles[level] != new_metadata[header_key]:         # 如果有，但和 current_titles 不一致（理论上不应该，但防错），也强制同步为当前状态。
                     new_metadata[header_key] = current_titles[level]
 
             processed_docs.append(
@@ -193,14 +193,14 @@ class MarkdownDirSplitter:
         """
         处理一个目录下的所有 Markdown 文件，并将它们统一结构化、分块、添加标题层级后，返回一个完整的 Document 列表
         :param md_dir: Markdown 文件所在的目录路径 "./output/chapter1"，里面可能有 page_01.md, page_02.md 等
-        :param source_filename:  md数据的原始文件（pdf）。
+        :param source_filename:  md数据的原始文件(pdf)。
         :return:
         """
         # 读取 所有 .md 文件，按页码/章节排序
         md_files = get_sorted_md_files(md_dir)
         all_documents = []
         for md_file in md_files:
-            log.info(f"真正处理的文件为： {md_file}")
+            log.info(f"真正处理的文件为:{md_file}")
             all_documents.extend(self.process_md_file(md_file))    
         """
         process_md_file 内部做了什么？
@@ -219,11 +219,12 @@ class MarkdownDirSplitter:
 
 
 if __name__ == "__main__":
-    md_dir = "F:\workspace\langgraph_project\Multimodal_RAG\output\RBF神经网络无人艇包含控制推导"
+    md_dir = r"F:\workspace\langgraph_project\Multimodal_RAG\output\RBF神经网络无人艇包含控制推导"
 
-    splitter = MarkdownDirSplitter(images_output_dir="F:\workspace\langgraph_project\Multimodal_RAG\output\images")
+    splitter = MarkdownDirSplitter(images_output_dir=r"F:\workspace\langgraph_project\Multimodal_RAG\output\images")
 
     docs = splitter.process_md_dir(md_dir, source_filename="RBF神经网络无人艇包含控制推导.pdf")
+
 
     for i, doc in enumerate(docs):
         print(f"\n文档{i+1}:")

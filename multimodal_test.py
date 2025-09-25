@@ -21,7 +21,8 @@ import json
 #     print(f"请求失败: {resp_txt.code} - {resp_txt.message}")
 
 
-# 图片向量测试 多模态 
+# 图片向量测试 多模态
+print("图片向量测试 多模态")
 image = "https://dashscope.oss-cn-beijing.aliyuncs.com/images/256_1.png"
 input = [{"image": image}]
 resp_img = dashscope.MultiModalEmbedding.call(
@@ -32,7 +33,6 @@ resp_img = dashscope.MultiModalEmbedding.call(
 # 检查响应状态
 if resp_img.status_code == HTTPStatus.OK:
     print("图片✅ 请求成功！")
-
     # 提取 embedding 数据
     embedding = resp_img.output['embeddings'][0]['embedding']
     usage = resp_img.usage
@@ -42,6 +42,7 @@ if resp_img.status_code == HTTPStatus.OK:
     print(f'使用tokens: {usage["total_tokens"]}')
     print(f'类型为 {resp_img.output["embeddings"][0]["type"]}')   # image or text or video
 # 视频向量测试 多模态
+print("视频向量测试 多模态")
 video = r"F:\workspace\langgraph_project\Adaptive_RAG\datas\new+video.mp4"
 input = [{"video": video}]
 resp_video = dashscope.MultiModalEmbedding.call(

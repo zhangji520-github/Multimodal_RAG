@@ -1,22 +1,37 @@
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import time
 from http import HTTPStatus
 from typing import Tuple, List, Dict, Optional
-
 import dashscope
-
-from utils.env_utils import ALIBABA_API_KEY
 from utils.log_utils import log
+from typing import NamedTuple, Dict, List
 
 # ========= 配置区 =========
 DASHSCOPE_MODEL = "multimodal-embedding-v1"  # 指定使用的达摩院多模态嵌入模型名称
-
+ALIBABA_API_KEY = os.environ.get("DASHSCOPE_API_KEY")
 RPM_LIMIT = 120  # 每分钟最多调用次数（Requests Per Minute）
 WINDOW_SECONDS = 60  # 限流时间窗口（秒），与RPM_LIMIT配合实现每分钟限流
 
 RETRY_ON_429 = True  # 是否在遇到429（请求过多）状态码时进行重试
 MAX_429_RETRIES = 5  # 429状态码的最大重试次数
 BASE_BACKOFF = 2.0  # 指数退避算法的基础等待时间（秒）
+
+class WorkItem(NamedTuple):
+    item: Dict
+    mode: str  # 'text' or 'image'
+    api_image: str  # 若 mode='image'：URL 或 base64 编码的图像数据；若 mode='text'：空字符串
+"""
+表示一个待处理的多模态任务项。
+
+Attributes:
+    item (Dict): 原始数据项，包含 text/image_path 等字段。
+    mode (str): 处理模式，'text' 或 'image'。
+    api_image (str): 
+        - 若 mode='image'：URL 或 base64 编码的图像数据；
+        - 若 mode='text'：空字符串。
+"""
 
 # 图片最大体积（URL HEAD 检查），若超过则跳过图片项
 MAX_IMAGE_BYTES = 3 * 1024 * 1024  # 3MB
@@ -81,7 +96,7 @@ def image_to_base64(img: str) -> Tuple[str, str]:
             b64 = base64.b64encode(f.read()).decode("utf-8")
         # 构建data URI格式
         api_img = f"data:{mime};base64,{b64}"
-        # store 用原路径或 basename 或 URL 原值，这里存原字符串
+        # store 用原路径或 basename 或 URL 原值    api_image = data:image/...;base64,...（给 API 用）
         return api_img, img
     except Exception as e:
         print(f"[图片] 本地文件转 base64 失败：{e}")
@@ -129,8 +144,7 @@ def normalize_image(img: str) -> Tuple[str, str]:
         return raw, raw
 
 
-
-    # 本地文件处理
+    # 本地文件处理 DashScope 的多模态模型支持两种图片输入： URL（直接传字符串） 或者 Base64 data URI（传 data:image/...）本地文件必须转 base64 才能上传。
     if os.path.isfile(raw):
         return image_to_base64(raw)
 
@@ -198,7 +212,7 @@ def call_dashscope_once(input_data: List[Dict]) -> Tuple[bool, List[float], Opti
 
 
 def process_item_with_guard(item: Dict, mode: str, api_image: str = "") -> Dict:
-    """处理单个数据项（文本或图像），生成嵌入向量
+    """处理单个数据项（文本或图像）， 构造input_data 给到 Dashscope 生成嵌入向量
 
     mode = 'text'：文本项：把 content 向量化；
     mode = 'image'：图片项：向量化图片
@@ -218,66 +232,71 @@ def process_item_with_guard(item: Dict, mode: str, api_image: str = "") -> Dict:
     if mode == 'text':
         # 构建文本输入数据
         input_data = [{'text': raw_content}]
-        # 调用API获取文本的嵌入向量
+        # 调用API获取文本的嵌入向量  (成功标志, 阿里巴巴返回的嵌入向量, HTTP状态码, 重试等待时间) ok 告诉你成没成，embedding 是你要的结果，status 告诉你为什么失败，retry_after 告诉你多久能重试
         ok, embedding, status, retry_after = call_dashscope_once(input_data)
         if ok:
-            new_item['dense'] = embedding  # 成功时添加嵌入向量
+            new_item['text_content_dense'] = embedding  # 成功时添加嵌入向量到原来的item
         else:
-            new_item['dense'] = []  # 失败时设置为空数组
+            new_item['text_content_dense'] = []  # 失败时设置为空数组
         return new_item
 
     elif mode == 'image':
         if not api_image:
-            new_item['dense'] = []  # 无有效图像数据时设置为空数组
+            new_item['text_content_dense'] = []  # 无有效图像数据时设置为空数组
         else:
             # 构建图像输入数据
             input_data = [{'image': api_image}]
             # 调用API获取图像的嵌入向量
             ok, embedding, status, retry_after = call_dashscope_once(input_data)
             if ok:
-                new_item['dense'] = embedding  # 成功时添加嵌入向量
+                new_item['text_content_dense'] = embedding  # 成功时添加嵌入向量
             else:
-                new_item['dense'] = []  # 失败时设置为空数组
+                new_item['text_content_dense'] = []  # 失败时设置为空数组
         new_item['text'] = "图片"  # 为图像项设置统一的文本标识
         return new_item
 
     else:
         # 未知模式处理
-        new_item['dense'] = []
+        new_item['text_content_dense'] = []
         return new_item
 
 
-def build_work_items(expanded_data: List[Dict]) -> List[Tuple[Dict, str, str]]:
+def build_work_items(expanded_data: List[Dict]) -> List[WorkItem]:
     """构建工作项列表，将数据拆分为文本项和图片项
-
-    返回 (item, mode, api_image) 三元组
-
     Args:
         expanded_data: 扩展后的数据列表
 
     Returns:
-        List[Tuple]: 工作项列表，每个元素为(数据项, 模式, API图像数据)
+        List[WorkItem]: (item, mode, api_image) 三元组列表
+            item (Dict): 原始数据项，包含 text/image_path 等字段。
+            mode (str): 处理模式，'text' 或 'image'。
+            api_image (str):
+                - 若 mode='image'：URL 或 base64 编码的图像数据；
+                - 若 mode='text'：空字符串。
+
     """
-    work_items: List[Tuple[Dict, str, str]] = []
+    work_items: List[WorkItem] = []
 
     for item in expanded_data:
+        # 1️⃣ 检查是否有文本内容
         content = (item.get('text') or '').strip()  # 获取文本内容
+        # 2️⃣ 检查是否有图片路径
         image_raw = (item.get('image_path') or '').strip()  # 获取原始图像路径
 
-        # 文本项处理
+        # ====== 文本任务识别 只要原始数据中有非空（且非纯空格）的 'text' 字段，就生成一个 mode='text' 的任务。 ======
         if content:
-            work_items.append((item, 'text', ''))
+            work_items.append(WorkItem(item=item, mode='text', api_image=''))
 
-        # 图片项处理
+        # ============ 图片任务：mode = 'image' ============
         if image_raw:
-            # 规范化图像输入
+            # 规范化图像输入  normalize_image识别 URL 和本地文件两种类型
             api_img, store_img = normalize_image(image_raw)
             if api_img:
                 # 创建图像项的副本并更新存储路径
                 pic_item = item.copy()
-                pic_item['image_path'] = store_img
+                pic_item['image_path'] = store_img   # 原始的 item + 规范化的 image_path 作为 WorkItem.item
                 # 添加到工作项列表
-                work_items.append((pic_item, 'image', api_img))
+                work_items.append(WorkItem(item=pic_item, mode='image', api_image=api_img))
             else:
                 # 图片无效或太大则跳过
                 pass
