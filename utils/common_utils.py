@@ -43,6 +43,66 @@ def get_sorted_md_files(input_dir: str) -> List[str]:
     sorted_files = sorted(md_files, key=sort_key)
     return sorted_files
 
+def get_surrounding_text_content(data_list, index, max_prev_chunks=3, max_next_chunks=2, max_chars=800):
+    """
+    获取指定图片字典的前后文本字典的文本内容（支持多段聚合）。
+    
+    对于科研论文，图片通常需要更多上下文来理解，因此会聚合多段前后文本。
+
+    参数:
+        data_list: 包含字典的列表，每个字典有'text'和'image_path'键
+        index: 当前图片字典在列表中的索引
+        max_prev_chunks: 最多向前查找的文本段数，默认3段
+        max_next_chunks: 最多向后查找的文本段数，默认2段
+        max_chars: 聚合文本的最大字符数，默认800字（避免上下文过长）
+
+    返回:
+        一个元组 (prev_text, next_text):
+        - prev_text: 前面多个文本块聚合的内容，如果找不到则为 None
+        - next_text: 后面多个文本块聚合的内容，如果找不到则为 None
+    """
+    prev_texts = []
+    next_texts = []
+
+    # 查找前面的文本字典（最多max_prev_chunks段）
+    i = index - 1
+    collected_prev = 0
+    prev_char_count = 0
+    while i >= 0 and collected_prev < max_prev_chunks:
+        # 检查是否为文本字典：image_path为空字符串或None
+        if 'text' in data_list[i] and not data_list[i].get('image_path'):
+            text = data_list[i].get('text', '')
+            if text:  # 只添加非空文本
+                # 检查是否超过字符限制
+                if prev_char_count + len(text) > max_chars and prev_texts:
+                    break
+                prev_texts.insert(0, text)  # 插入到开头，保持顺序
+                prev_char_count += len(text)
+                collected_prev += 1
+        i -= 1
+
+    # 查找后面的文本字典（最多max_next_chunks段）
+    j = index + 1
+    collected_next = 0
+    next_char_count = 0
+    while j < len(data_list) and collected_next < max_next_chunks:
+        # 检查是否为文本字典：image_path为空字符串或None
+        if 'text' in data_list[j] and not data_list[j].get('image_path'):
+            text = data_list[j].get('text', '')
+            if text:  # 只添加非空文本
+                # 检查是否超过字符限制
+                if next_char_count + len(text) > max_chars and next_texts:
+                    break
+                next_texts.append(text)
+                next_char_count += len(text)
+                collected_next += 1
+        j += 1
+
+    # 聚合文本，使用换行分隔
+    prev_text = '\n'.join(prev_texts) if prev_texts else None
+    next_text = '\n'.join(next_texts) if next_texts else None
+
+    return prev_text, next_text
 
 def delete_directory_if_non_empty(dir_path):
     """

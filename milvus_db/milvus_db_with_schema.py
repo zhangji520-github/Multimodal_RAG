@@ -11,14 +11,17 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from splitters.splitter_md import MarkdownDirSplitter
 from langchain_core.documents import Document
-from utils.embeddings_utils import build_work_items, process_item_with_guard, limiter, RETRY_ON_429, MAX_429_RETRIES, BASE_BACKOFF
+from utils.embeddings_utils import process_item_with_guard, limiter, RETRY_ON_429, MAX_429_RETRIES, BASE_BACKOFF
 from langchain_milvus import Milvus
 from pymilvus import DataType, Function, FunctionType, MilvusClient
-from utils.embeddings_utils import WorkItem
 from env_utils import COLLECTION_NAME, MILVUS_URI
+from utils.embeddings_utils import image_to_base64
+from utils.common_utils import get_surrounding_text_content
+from langchain_core.messages import HumanMessage  
 import logging
 import time
 import random
+from llm_utils import qwen3_max
 
 
 
@@ -52,7 +55,7 @@ class MilvusVectorSave:
 
         schema.add_field("title", DataType.VARCHAR, max_length=1000, enable_analyzer=True, 
                         analyzer_params={'tokenizer': 'jieba', 'filter': ['cnalphanumonly']}, description="对应元数据的Header")
-        schema.add_field("text", DataType.VARCHAR, max_length=6000, enable_analyzer=True,
+        schema.add_field("text", DataType.VARCHAR, max_length=10000, enable_analyzer=True,
                         analyzer_params={'tokenizer': 'jieba', 'filter': ['cnalphanumonly']}, description="对应每个文本块的内容") 
         schema.add_field("image_path", DataType.VARCHAR, max_length=2000, description="图片文件的本地路径，仅图片类型数据使用")
 
@@ -136,6 +139,8 @@ class MilvusVectorSave:
         if is_first:  
             if COLLECTION_NAME in self.client.list_collections():
                 self.client.release_collection(collection_name=COLLECTION_NAME)
+                # self.client.drop_index(collection_name=COLLECTION_NAME, index_name="sparse_inverted_index")
+                # self.client.drop_index(collection_name=COLLECTION_NAME, index_name="dense_vector_index")
                 self.client.drop_collection(collection_name=COLLECTION_NAME)
 
         self.client.create_collection(
@@ -201,7 +206,7 @@ class MilvusVectorSave:
             # 对文本块处理：拼接标题和内容
             if metadata.get('embedding_type') == 'text':
                 if doc_dict['title']:
-                    doc_dict['text'] = doc_dict['title'] + '：' + doc.page_content
+                    doc_dict['text'] = doc_dict['title'] + ':' + doc.page_content
                 else:
                     doc_dict['text'] = doc.page_content
             
@@ -220,59 +225,193 @@ class MilvusVectorSave:
             logger.warning("🐶没有需要写入的数据")
             return
         
+        # 数据清洗：确保text字段不超过最大长度
+        MAX_TEXT_LENGTH = 10000
+        for item in processed_data:
+            text = item.get('text', '')
+            if len(text) > MAX_TEXT_LENGTH:
+                logger.warning(f"⚠️ 文本超长({len(text)}字符)，已截断至{MAX_TEXT_LENGTH}字符: {text[:50]}...")
+                item['text'] = text[:MAX_TEXT_LENGTH]
+        
         try:
             insert_res = self.client.insert(collection_name=COLLECTION_NAME, data=processed_data)
             print(f"[Milvus] 成功写入 {len(processed_data)} 条数据.IDs 示例: {insert_res['ids'][:5]}")
         except Exception as e:
             logger.error(f"🐶写入Milvus失败: {e}")
             raise e
-        
-    def do_save_to_milvus(self, docs: List[Document]):
+
+    @staticmethod
+    def generate_image_description(data_list:List[Dict]):
         """
-        将 LangChain 的 Document 对象列表（来自文本/图像分割器）
-        → 转换为结构化字典
-        → 调用 DashScope 多模态 API 生成统一向量（dense）
-        → 写入 Milvus 向量数据库 
-        返回的 result 是增强后的字典，必定包含 dense 字段：
-            成功 dense = [0.1, -0.2, ...]
-            失败 dense = []
-            图像任务还会设置 text = "图片"（便于前端展示）
+        为文档中包含图片的条目(image_path 字段非空)生成一段基于上下文的、简洁的多模态文本描述 以便后续可以将这段描述用于向量化(embedding)并存入向量数据库 Milvus。
+
+        参数:
+            data_list: 包含字典的列表
+
+        返回:
+            包含完整结果的新列表
         """
-        # 第一步：把 Document 转换为结构化字典
-        expanded_data = self.doc_to_dict(docs)
-        # 第二步：调用 DashScope 多模态 API 生成统一向量（dense）
-        work_items: List[WorkItem] = build_work_items(expanded_data)
+        for index, item in enumerate(data_list):
+            if item.get('image_path'):  # 检查是否为图片字典
+                # 获取前后文本内容
+                prev_text, next_text = get_surrounding_text_content(data_list, index)
+                
+                # 打印调试信息
+                logger.info(f"\n{'='*50}")
+                logger.info(f"正在处理图片: {item.get('image_path')}")
+                logger.info(f"前文内容: {prev_text[:100] if prev_text else 'None'}...")
+                logger.info(f"后文内容: {next_text[:100] if next_text else 'None'}...")
+                logger.info(f"{'='*50}\n")
+
+                # 将图片转换为base64
+                base64_img, _  = image_to_base64(item['image_path'])
+
+                # 构建提示词模板
+                context_prompt = ""
+                if prev_text and next_text:
+                    context_prompt = f"""
+你是一位科研论文图像理解专家。请基于论文上下文和图片内容，生成该图片的英文语义描述。
+
+【论文上下文】
+前文：{prev_text}
+
+后文：{next_text}
+
+【任务要求】
+这是一篇科研论文中的图片，请：
+1. **优先参考上下文**：仔细阅读前后文，提取与图片相关的关键信息（如图片标题、图注、实验说明、数据含义等）
+2. **结合图片内容**：观察图片实际展示的内容（图表类型、坐标轴、数据趋势、架构组成等）
+3. **生成语义描述**：将上下文信息与图片内容融合，生成一段完整、准确的描述，使读者无需看图也能理解其含义
+4. **重点说明**：
+   - 如果上下文提到了图号、图题，请包含
+   - 如果是数据图表，说明表达的数据含义和趋势
+   - 如果是架构图/流程图，说明其展示的系统或流程
+   - 如果是实验场景图，说明实验环境和关键要素
+5. 描述长度控制在200-400字
+
+请直接给出描述，不要有"这张图片..."等前缀。
+                    """
+                elif prev_text:
+                    context_prompt = f"""
+你是一位科研论文图像理解专家。请基于论文上下文和图片内容，生成该图片的英文语义描述。
+
+【论文上下文（前文）】
+{prev_text}
+
+【任务要求】
+这是一篇科研论文中的图片，请：
+1. **优先参考前文**：仔细阅读前文，提取与图片相关的关键信息（如图片标题、图注、实验说明等）
+2. **结合图片内容**：观察图片实际展示的内容
+3. **生成语义描述**：将上下文信息与图片内容融合，生成一段完整、准确的描述
+4. **重点说明**：图号、图题、数据含义、架构组成或实验要素
+5. 描述长度控制在200-400字
+
+请直接给出描述，不要有"这张图片..."等前缀。
+                    """
+                elif next_text:
+                    context_prompt = f"""
+你是一位科研论文图像理解专家。请基于论文上下文和图片内容，生成该图片的英文语义描述。
+
+【论文上下文（后文）】
+{next_text}
+
+【任务要求】
+这是一篇科研论文中的图片，请：
+1. **优先参考后文**：仔细阅读后文，提取与图片相关的关键信息（如图片说明、结果分析等）
+2. **结合图片内容**：观察图片实际展示的内容
+3. **生成语义描述**：将上下文信息与图片内容融合，生成一段完整、准确的描述
+4. **重点说明**：图号、图题、数据含义、架构组成或实验要素
+5. 描述长度控制在200-400字
+
+请直接给出描述，不要有"这张图片..."等前缀。
+                    """
+                else:
+                    context_prompt = """
+你是一位科研论文图像理解专家。请观察这张图片并生成英文描述。
+
+【任务要求】
+这是一篇科研论文中的图片，请：
+1. 识别图片类型（数据图表、架构图、流程图、实验场景图等）
+2. 描述图片展示的核心内容和关键信息
+3. 如果是图表，说明坐标轴、数据趋势等
+4. 如果是架构/流程图，说明主要组成部分
+5. 描述长度控制在200-400字
+
+请直接给出描述，不要有"这张图片..."等前缀。
+                    """
+
+                # 构建多模态消息
+                message = HumanMessage(
+                    content=[
+                        {"type": "text", "text": context_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"{base64_img}"
+                            }
+                        }
+                    ]
+                )
+
+                # 调用模型生成描述  修改原始类型为图片的text字段
+                response = qwen3_max.invoke([message])
+                item['text'] = response.content
         
+        return data_list
+
+    def do_save_to_milvus(self, processed_data: List[Document]):
+        """
+        第一步：
+        把Splitter之后的的数据（document对象列表），先转换为字典；
+        第二步：
+        把字典中的文本 和图片 ，进行向量化，然后再存入字典。
+        第三步：
+        最后写入向量数据库
+        :param processed_data:
+        :return:
+        """
+        # 第一步
+        expanded_data = MilvusVectorSave.generate_image_description(MilvusVectorSave.doc_to_dict(processed_data))
         processed_data: List[Dict] = []
-        for idx,wi in enumerate(work_items, start=1):
+        # 处理每个 item
+        for idx, item in enumerate(expanded_data, 1):
+            # 限速控制
             limiter.acquire()
 
-            # 情况一：启用 429 限流重试（RETRY_ON_429 = True）
+            # 处理 + 可选 429 重试
             if RETRY_ON_429:
                 attempts = 0
                 while True:
-                    res = process_item_with_guard(wi.item.copy(), wi.mode, wi.api_image)
-                    if res.get('text_content_dense'):
-                        processed_data.append(res)
+                    # 包装版处理
+                    result = process_item_with_guard(item.copy())
+                    # 检查是否成功
+                    if result.get("text_content_dense"):
+                        processed_data.append(result)
                         break
                     attempts += 1
-                    if attempts >= MAX_429_RETRIES:
-                        print(f"🐶429重试次数超过最大值: {MAX_429_RETRIES}")
-                        processed_data.append(res)
+                    if attempts > MAX_429_RETRIES:
+                        print(f"[429重试] 超过最大重试次数，跳过 idx={idx}")
+                        processed_data.append(result)
                         break
                     backoff = BASE_BACKOFF * (2 ** (attempts - 1)) * (0.8 + random.random() * 0.4)
                     print(f"[429重试] 第{attempts}次，sleep {backoff:.2f}s …")
                     time.sleep(backoff)
-            # 情况二：不启用 429 限流重试（RETRY_ON_429 = False） 适用于调试或低频场景
             else:
-                result = process_item_with_guard(wi.item.copy(), mode=wi.mode, api_image=wi.api_image)
-                processed_data.append(result)
-            # 进度提示 每 20 个 item 打印一次进度，避免日志刷屏
-            if idx % 20 == 0:
-                print(f"[进度] 已处理 {idx}/{len(work_items)}")
+                # 若关闭 429 重试，这里同样使用包装版
+                processed_data.append(process_item_with_guard(item.copy()))
 
-        # 第三步
+            # 进度打印
+            if idx % 20 == 0:
+                print(f"[进度] 已处理 {idx}/{len(expanded_data)}")
+
+        # 打印处理后的 item 内容
+        # for item in processed_data:
+        #     print(json.dumps(item, ensure_ascii=False, indent=4))
+        
+        # 第三步：写入向量数据库
         self.write_to_milvus(processed_data)
+        
+        # 返回处理后的数据
         return processed_data
 
 if __name__ == "__main__":
@@ -286,9 +425,9 @@ if __name__ == "__main__":
     # res = client.describe_collection(collection_name=COLLECTION_NAME)
     # print("集合信息:")
     # print(res)
-    md_dir = r"F:\workspace\langgraph_project\Multimodal_RAG\output\RBF神经网络无人艇包含控制推导"
+    md_dir = r"F:\workspace\langgraph_project\Multimodal_RAG\output\GPT4技术报告"
     splitter = MarkdownDirSplitter(images_output_dir=r"F:\workspace\langgraph_project\Multimodal_RAG\output\images")
-    docs = splitter.process_md_dir(md_dir, source_filename="RBF神经网络无人艇包含控制推导.pdf")
+    docs = splitter.process_md_dir(md_dir, source_filename="GPT4技术报告.pdf")
 
     res: List[Dict] = milvus_vector_save.do_save_to_milvus(docs)
 

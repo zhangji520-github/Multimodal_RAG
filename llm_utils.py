@@ -24,7 +24,6 @@ openai_embedding = OpenAIEmbeddings(
 qwen_embeddings = DashScopeEmbeddings(
     model="text-embedding-v4", 
     dashscope_api_key=os.environ.get("DASHSCOPE_API_KEY"),
-    # DashScopeEmbeddings 内部会自动处理批处理大小限制
 )
 
 # 全模态大模型
@@ -43,19 +42,33 @@ qwen_embeddings = DashScopeEmbeddings(
 # )
 
 # qwen 家族模型
-# llm = ChatOpenAI(
-#     model='qwen3-235b-a22b',
-#     api_key=os.getenv("DASHSCOPE_API_KEY"),
-#     base_url=QWEN_BASE_URL,
-#     streaming=True,
-#     extra_body={
-#         "enable_search": True,  # 启用搜索功能
-#         "search_options": {
-#             "forced_search": False
-#         },
-#         "enable_thinking": False  # 启用思考功能
-#     }
-# )
+qwen3 = ChatOpenAI(
+    model='qwen3-235b-a22b',
+    api_key=os.getenv("DASHSCOPE_API_KEY"),
+    base_url=QWEN_BASE_URL,
+    streaming=True,
+    extra_body={
+        "enable_search": True,  # 启用搜索功能
+        "search_options": {
+            "forced_search": False
+        },
+        "enable_thinking": False  # 启用思考功能
+    }
+)
+
+qwen3_max = ChatOpenAI(
+    model="qwen3-max",
+    api_key=os.getenv("DASHSCOPE_API_KEY"),
+    base_url=QWEN_BASE_URL,
+    streaming=True,
+    extra_body={
+        "enable_search": True,  # 启用搜索功能
+        "search_options": {
+            "forced_search": False
+        },
+        "enable_thinking": False  # 启用思考功能
+    }
+)
 
 # llm = ChatOpenAI(
 #     model='qwen3-32b',

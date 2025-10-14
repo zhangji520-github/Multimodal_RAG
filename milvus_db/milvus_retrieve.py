@@ -1,320 +1,165 @@
-from pymilvus import MilvusClient, AnnSearchRequest, WeightedRanker, RRFRanker
-from typing import List, Dict, Optional
 import sys
 import os
-
 # 添加上级目录到 Python 路径
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from utils.embeddings_utils import call_dashscope_once
-from env_utils import COLLECTION_NAME
-
+from pymilvus import MilvusClient, AnnSearchRequest, WeightedRanker, RRFRanker
+from typing import List, Dict, Any
+from utils.embeddings_utils import call_dashscope_once, image_to_base64
+from milvus_db.milvus_db_with_schema import logger
+from env_utils import COLLECTION_NAME, MILVUS_URI
 
 class MilvusRetriever:
-    def __init__(self, collection_name: str = COLLECTION_NAME, milvus_client: MilvusClient = None, top_k: int = 5):
+    def __init__(self, collection_name: str, milvus_client: MilvusClient, top_k: int = 5):
         self.collection_name = collection_name
         self.client: MilvusClient = milvus_client
         self.top_k = top_k
 
-
-    def dense_search(self, query_embedding: List[float], limit: int = 5) -> List[Dict]:
+    def dense_search(self, query_embedding, limit=5):
         """
-        稠密向量检索（支持文本和图像的语义搜索）
-        :param query_embedding: 已经向量化的内容 1024维向量
+        密集向量检索
+        :param query_embedding: 查询向量
         :param limit: 返回结果数量
-        :return: 检索结果列表
+        :return: 查询结果
         """
-        search_params = {"metric_type": "COSINE", "params": {"ef": 64}}
+        search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}}
         res = self.client.search(
             collection_name=self.collection_name,
-            data=[query_embedding],
-            anns_field="text_content_dense",  # 使用正确的稠密向量字段名
-            limit=limit,
-            output_fields=["text", "category", "filename", "image_path", "title"],
-            search_params=search_params,
-        )
-        return res[0] if res else []
-
-    def sparse_search_content(self, query: str, limit: int = 5) -> List[Dict]:
-        """
-        内容稀疏向量搜索（BM25全文检索）
-        :param query: 搜索的关键词文本
-        :param limit: 返回结果数量
-        :return: 检索结果列表
-        """
-        res = self.client.search(
-            collection_name=self.collection_name,
-            data=[query],
-            anns_field="text_content_sparse",  # 使用正确的内容稀疏向量字段名
-            limit=limit,
-            output_fields=["text", "category", "filename", "image_path", "title"],
-            search_params={"metric_type": "BM25", "params": {"drop_ratio_search": 0.2}},
-        )
-        return res[0] if res else []
-
-    def sparse_search_title(self, query: str, limit: int = 5) -> List[Dict]:
-        """
-        标题稀疏向量搜索（BM25标题检索）
-        :param query: 搜索的关键词文本
-        :param limit: 返回结果数量
-        :return: 检索结果列表
-        """
-        res = self.client.search(
-            collection_name=self.collection_name,
-            data=[query],
-            anns_field="title_sparse",  # 使用标题稀疏向量字段
-            limit=limit,
-            output_fields=["text", "category", "filename", "image_path", "title"],
-            search_params={"metric_type": "BM25", "params": {"drop_ratio_search": 0.2}},
-        )
-        return res[0] if res else []
-
-    def get_query_embedding(self, query: str, mode: str = "text") -> List[float]:
-        """
-        将查询文本转换为向量嵌入
-        :param query: 查询文本
-        :param mode: 模式，'text' 或 'image'
-        :return: 向量嵌入列表
-        """
-        if mode == "text":
-            input_data = [{"text": query}]
-        else:
-            input_data = [{"image": query}]  # query为图像路径或base64
-        
-        ok, embedding, _, _ = call_dashscope_once(input_data)
-        return embedding if ok else []
-
-    def hybrid_search(self, 
-                     query: str, 
-                     weights: Optional[List[float]] = None,
-                     ranker_type: str = "rrf",
-                     rrf_k: int = 60,
-                     limit: int = 10) -> List[Dict]:
-        """
-        官方混合检索：使用 Milvus 原生 hybrid_search API
-        :param query: 查询文本
-        :param weights: 权重列表 [dense_weight, sparse_content_weight, sparse_title_weight]
-        :param ranker_type: 重排序策略 "rrf" 或 "weighted"
-        :param rrf_k: RRF 算法的 k 参数，默认 60
-        :param limit: 返回结果数量
-        :return: 混合检索结果列表
-        """
-        # 默认权重配置
-        if weights is None:
-            weights = [0.6, 0.3, 0.1]  # [dense, sparse_content, sparse_title]
-        
-        # 1. 获取查询向量
-        query_embedding = self.get_query_embedding(query, mode="text")
-        if not query_embedding:
-            print("⚠️ 获取查询向量失败，仅使用稀疏向量检索")
-            return self.sparse_search_content(query, limit=limit)
-        
-        # 2. 构建搜索请求列表
-        search_requests = []
-        
-        # 稠密向量搜索请求
-        dense_search = AnnSearchRequest(
-            data=[query_embedding],
+            data = [query_embedding],
             anns_field="text_content_dense",
-            param={"metric_type": "COSINE", "params": {"ef": 64}},
-            limit=limit
+            limit=limit,
+            search_params=search_params,
+            output_fields=["text", "category", "filename", "image_path", "title"],
         )
-        search_requests.append(dense_search)
-        
-        # 内容稀疏向量搜索请求
-        sparse_content_search = AnnSearchRequest(
-            data=[query],
+        logger.info(f"✅ 密集向量检索成功，返回 {len(res[0])} 条结果")
+        return res[0]
+    
+    def sparse_content_search(self, query, limit=5):
+        """
+        内容稀疏向量检索
+        :param query: 查询内容
+        :param limit: 返回结果数量
+        :return: 查询结果
+        """
+        search_params = {"metric_type": "BM25", "params": {'drop_ratio_search': 0.2}}
+        res = self.client.search(
+            collection_name=self.collection_name,
+            data = [query],
             anns_field="text_content_sparse",
-            param={"metric_type": "BM25", "params": {"drop_ratio_search": 0.2}},
-            limit=limit
+            limit=limit,
+            search_params=search_params,
+            output_fields=["text", "category", "filename", "image_path", "title"],
         )
-        search_requests.append(sparse_content_search)
-        
-        # 标题稀疏向量搜索请求
-        sparse_title_search = AnnSearchRequest(
-            data=[query],
+        logger.info(f"✅ 内容稀疏向量检索成功，返回 {len(res[0])} 条结果")
+        return res[0]
+    
+    def sparse_title_search(self, query, limit=5):
+        """
+        标题稀疏向量检索
+        :param query: 查询标题
+        :param limit: 返回结果数量
+        :return: 查询结果
+        """
+        search_params = {"metric_type": "BM25", "params": {'drop_ratio_search': 0.2}}
+        res = self.client.search(
+            collection_name=self.collection_name,
+            data = [query],
             anns_field="title_sparse",
-            param={"metric_type": "BM25", "params": {"drop_ratio_search": 0.2}},
-            limit=limit
+            limit=limit,
+            search_params=search_params,
+            output_fields=["text", "category", "filename", "image_path", "title"],
         )
-        search_requests.append(sparse_title_search)
-        
-        # 3. 选择重排序策略
-        if ranker_type == "weighted":
-            ranker = WeightedRanker(*weights)
-        else:  # rrf
-            ranker = RRFRanker(k=rrf_k)
-        
-        # 4. 执行混合搜索
-        try:
-            results = self.client.hybrid_search(
-                collection_name=self.collection_name,
-                reqs=search_requests,
-                ranker=ranker,
-                limit=limit,
-                output_fields=["text", "category", "filename", "image_path", "title"]
-            )
-            return results[0] if results else []
-        except Exception as e:
-            print(f"❌ 混合搜索失败: {e}")
-            # 降级到单一检索
-            return self.dense_search(query_embedding, limit=limit)
-
-    def hybrid_search_with_weighted_ranker(self, 
-                                          query: str, 
-                                          weights: List[float] = None,
-                                          limit: int = 10) -> List[Dict]:
-        """
-        使用加权重排序器的混合检索
-        :param query: 查询文本
-        :param weights: 权重列表 [dense, sparse_content, sparse_title]
-        :param limit: 返回结果数量
-        :return: 检索结果列表
-        """
-        if weights is None:
-            weights = [0.6, 0.3, 0.1]
-        
-        return self.hybrid_search(
-            query=query,
-            weights=weights,
-            ranker_type="weighted",
-            limit=limit
-        )
+        logger.info(f"✅ 标题稀疏向量检索成功，返回 {len(res[0])} 条结果")
+        return res
     
-    def hybrid_search_with_rrf_ranker(self, 
-                                     query: str, 
-                                     k: int = 60,
-                                     limit: int = 10) -> List[Dict]:
+    def hybrid_search(
+        self,
+        query_dense_embedding,
+        query_text,
+        sparse_weight=1.0,
+        dense_weight=1.0,
+        limit=10
+    ):
         """
-        使用 RRF 重排序器的混合检索
-        :param query: 查询文本
-        :param k: RRF 算法的 k 参数
+        混合检索 都是针对"text_content_sparse"字段的检索,包括文本以及图片的dense向量 
+        当前只支持单传文本或者图片
+        :param query_dense_embedding: 查询密集向量 图片或者文本经过DashScope API 转化为的密集向量
+        :param query_text: 原始的查询文本 
+        :param sparse_weight: 稀疏向量权重 经过BM25算法转化为的稀疏向量
+        :param dense_weight: 密集向量权重
         :param limit: 返回结果数量
-        :return: 检索结果列表
+        :return: 查询结果
         """
-        return self.hybrid_search(
-            query=query,
-            ranker_type="rrf",
-            rrf_k=k,
-            limit=limit
+        # 每个 AnnSearchRequest 代表针对特定向量字段的基础 ANN 搜索请求 不管是图片还是文本，我们都可以统一转化为dense向量
+        dense_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}}
+        dense_req = AnnSearchRequest(
+            data = [query_dense_embedding],
+            anns_field = "text_content_dense",
+            limit = limit,
+            param = dense_search_params,
         )
 
-    def semantic_search(self, query: str, limit: int = 5) -> List[Dict]:
-        """
-        语义搜索（仅使用稠密向量）
-        :param query: 查询文本
-        :param limit: 返回结果数量
-        :return: 检索结果列表
-        """
-        query_embedding = self.get_query_embedding(query, mode="text")
-        if not query_embedding:
-            return []
-        
-        return self.dense_search(query_embedding, limit=limit)
+        sparse_search_params = {"metric_type": "BM25", "params": {'drop_ratio_search': 0.2}}
+        sparse_req = AnnSearchRequest(
+            data = [query_text],
+            anns_field = "text_content_sparse",
+            limit = limit,
+            param = sparse_search_params,
+        )
 
-    def keyword_search(self, query: str, limit: int = 5, search_title: bool = True) -> List[Dict]:
-        """
-        关键词搜索（仅使用稀疏向量）
-        :param query: 查询文本
-        :param limit: 返回结果数量
-        :param search_title: 是否同时搜索标题
-        :return: 检索结果列表
-        """
-        content_results = self.sparse_search_content(query, limit=limit)
-        
-        if search_title:
-            title_results = self.sparse_search_title(query, limit=limit)
-            # 简单合并去重
-            seen_ids = set()
-            combined_results = []
-            
-            for item in content_results + title_results:
-                item_id = f"{item.get('entity', {}).get('filename', '')}__{item.get('entity', {}).get('text', '')[:50]}"
-                if item_id not in seen_ids:
-                    seen_ids.add(item_id)
-                    combined_results.append(item)
-            
-            return combined_results[:limit]
-        
-        return content_results
+        # 在混合搜索中，重排序是一个关键步骤，它整合了来自多个向量搜索的结果，以确保最终输出是最相关和最准确的
+        ranker_weighted = WeightedRanker(sparse_weight, dense_weight)
+        # ranker_rrf = RRFRanker(k=100)
 
+        res = self.client.hybrid_search(
+            collection_name=self.collection_name,
+            reqs = [dense_req, sparse_req],
+            ranker = ranker_weighted,
+            limit = limit,
+            output_fields = ["text", "category", "filename", "image_path", "title"],
+        )[0]
+        logger.info(f"🔍 混合检索成功，返回 {len(res)} 条结果 (dense权重={dense_weight}, sparse权重={sparse_weight})")
+        return res
 
-# 使用示例
+    def retrieve(self, query: str) -> List[Dict[str, Any]]:
+        """
+        检索
+        :param query: # 在我们的使用场景中，用户要么输入一段文字，要么输入一个本地图片的完整路径。这两种情况不会混淆 如果 query 这个字符串，在当前电脑上恰好是一个真实存在的文件路径，那我就当它是图片来处理；否则，我就当它是普通文本
+        :return: 查询结果
+        """
+        if os.path.isfile(query):
+            # 构建图像输入数据，满足DashScope API 的要求
+            logger.info(f"📷 检测到图片查询: {query}")
+            # image_to_base64 返回 (api_img, img) 元组，我们只需要第一个元素
+            base64_img, _ = image_to_base64(query)
+            input_data = [{'image': base64_img}]
+            ok, dense_embedding, status, retry_after = call_dashscope_once(input_data)  # 调用API获取图像嵌入向量   调用 DashScope 多模态 API 时，只需要纯 Base64 字符串，不需要 data:image/... 前缀。
+        else:
+            # 构建文本输入数据，满足DashScope API 的要求
+            logger.info(f"📝 检测到文本查询: {query}")
+            input_data = [{'text': query}]
+            ok, dense_embedding, status, retry_after = call_dashscope_once(input_data)  # 调用API获取文本嵌入向量
+        
+        if ok:
+            if os.path.isfile(query):   # 纯图片之可以使用dense_search
+                results = self.dense_search(dense_embedding, limit=self.top_k)
+            else:
+                results = self.hybrid_search(dense_embedding, query, limit=self.top_k)
+        else:
+            raise ValueError(f"Failed to get dense embedding: {status}")
+        
+        # return results
+
+        docs = []
+        # print(results)
+        for hit in results:
+            docs.append({"text": hit.text, "category": hit.category, "filename": hit.filename, "image_path": hit.image_path, "title": hit.title})
+
+        logger.info(f"🎉 检索完成！成功返回 {len(docs)} 条文档结果")
+        return docs
+    
 if __name__ == "__main__":
-    from env_utils import MILVUS_URI
-    
-    # 初始化检索器
-    client = MilvusClient(uri=MILVUS_URI, user='root', password='Milvus')
-    retriever = MilvusRetriever(collection_name=COLLECTION_NAME, milvus_client=client)
-    
-    # 测试查询
-    test_query = "神经网络"
-    
-    print("=" * 60)
-    print(f"查询: {test_query}")
-    print("=" * 60)
-    
-    # 1. 官方混合检索 - RRF 重排序（推荐）
-    print("\n🔍 混合检索 (RRF重排序):")
-    rrf_results = retriever.hybrid_search_with_rrf_ranker(
-        query=test_query,
-        k=60,
-        limit=5
-    )
-    
-    for i, result in enumerate(rrf_results, 1):
-        entity = result.get('entity', {})
-        distance = result.get('distance', 0)
-        print(f"{i}. 标题: {entity.get('title', '')}")
-        print(f"   内容: {entity.get('text', '')[:100]}...")
-        print(f"   文件: {entity.get('filename', '')}")
-        print(f"   类型: {entity.get('category', '')}")
-        print(f"   相似度: {distance:.4f}")
-        print()
-    
-    # 2. 混合检索 - 加权重排序
-    print("\n⚖️ 混合检索 (加权重排序):")
-    weighted_results = retriever.hybrid_search_with_weighted_ranker(
-        query=test_query,
-        weights=[0.6, 0.3, 0.1],  # [dense, sparse_content, sparse_title]
-        limit=3
-    )
-    
-    # for i, result in enumerate(weighted_results, 1):
-    #     entity = result.get('entity', {})
-    #     distance = result.get('distance', 0)
-    #     print(f"{i}. {entity.get('title', '')} - 相似度: {distance:.4f}")
-    #     print(f"   内容: {entity.get('text', '')[:50]}...")
-    
-    # # 3. 语义搜索
-    # print("\n🎯 语义搜索结果:")
-    # semantic_results = retriever.semantic_search(test_query, limit=3)
-    # for i, result in enumerate(semantic_results, 1):
-    #     entity = result.get('entity', {})
-    #     distance = result.get('distance', 0)
-    #     print(f"{i}. {entity.get('title', '')} - 相似度: {distance:.4f}")
-    
-    # # 4. 关键词搜索
-    # print("\n🔤 关键词搜索结果:")
-    # keyword_results = retriever.keyword_search(test_query, limit=3)
-    # for i, result in enumerate(keyword_results, 1):
-    #     entity = result.get('entity', {})
-    #     distance = result.get('distance', 0)
-    #     print(f"{i}. {entity.get('title', '')} - BM25分数: {distance:.4f}")
-    
-    # # 5. 对比不同重排序策略
-    # print("\n📊 不同重排序策略对比:")
-    # print("RRF 策略结果数量:", len(rrf_results))
-    # print("加权策略结果数量:", len(weighted_results))
-    
-    # # 6. 自定义权重测试
-    # print("\n🎛️ 自定义权重测试 (专注于稀疏向量):")
-    # custom_results = retriever.hybrid_search_with_weighted_ranker(
-    #     query=test_query,
-    #     weights=[0.2, 0.6, 0.2],  # 更关注关键词匹配
-    #     limit=3
-    # )
-    
-    # for i, result in enumerate(custom_results, 1):
-    #     entity = result.get('entity', {})
-    #     print(f"{i}. {entity.get('title', '')}")
+    retrieve = MilvusRetriever(collection_name=COLLECTION_NAME, milvus_client=MilvusClient(uri=MILVUS_URI, user='root', password='Milvus'))
+    docs = retrieve.retrieve("GPT-4’s accuracy scores for a diverse set of languages")
+    for doc in docs:
+        print(doc) 

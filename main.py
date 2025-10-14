@@ -2,12 +2,14 @@ import gradio as gr
 from utils.common_utils import get_sorted_md_files,delete_directory_if_non_empty,get_filename
 from utils.log_utils import log
 import os
+from typing import List, Dict
+from splitters.splitter_md import MarkdownDirSplitter
+from milvus_db.milvus_db_with_schema import do_save_to_milvus
 
 
 from dots_ocr.parser import do_parse
-# md存储的临时模型
+# md存储的临时模型output\
 base_md_dir = r'F:\workspace\langgraph_project\Multimodal_RAG\output'
-
 
 class ProcessorAPP:
     
@@ -15,7 +17,7 @@ class ProcessorAPP:
         self.pdf_path = None        # 当前上传的PDF路径
         self.md_dir = None          # 保存MD文件目录路径  假设 self.pdf_path = "F:\\docs\\example.pdf" 则 解析后的文件会放在 self.md_dir = 'F:\workspace\langgraph_project\Multimodal_RAG\output\example\'
         self.md_files = None        # 获取所有MD文件并按页码排序 self.md_files 是一个列表，里面存的是所有 .md 文件的完整路径 ["F:\\output\\page_1.md", "F:\\output\\page_2.md", "F:\\output\\page_3.md"]
-        self.file_contents = {}     # 缓存所有MD文件内容，避免重复读取
+        self.file_contents = {}     # self.file_contents 是 字典（dict），它的作用是：用文件的完整路径作为“钥匙（key）”，把对应的文件内容作为“值（value）”存起来，方便后续快速查找和显示
 
     def upload_pdf(self, pdf_file):
         log.info(f"上传pdf文件：{pdf_file}")
@@ -33,32 +35,40 @@ class ProcessorAPP:
     
 
     def parse_pdf(self):
+        # 这解释了为什么前面要构造 md_files_dir = base_md_dir + filename —— 它正是 do_parse 实际写入的目录。
         """将用户上传的 PDF 文件解析成多个 Markdown(.md)文件，保存到指定目录中，并加载这些文件内容到内存缓存file_contents[f]，供后续界面选择和预览"""
         md_files_dir = os.path.join(base_md_dir, get_filename(self.pdf_path, False))  # eg: 'F:\workspace\langgraph_project\Multimodal_RAG\output\example\'
-        delete_directory_if_non_empty(md_files_dir)
+        delete_directory_if_non_empty(md_files_dir)   # 如果该目录已存在且非空，则删除整个目录及其内容。
+
         #  do_parse 会在传入的 output 目录下再次创建以PDF文件名命名的子目录 所以我们 output 选择上级目录
         do_parse(input_path=self.pdf_path, num_thread=32, no_fitz_preprocess=True, output=base_md_dir)   # 将 PDF 逐页解析为 Markdown 文件，输出到 base_md_dir 目录中，do_parse会自动创建以PDF文件名命名的子目录
+
         if os.path.isdir(md_files_dir):      # 检查 path 是否是一个存在的目录。
-            self.md_dir = md_files_dir       # 保存MD文件目录路径 记录当前 PDF 对应的输出目录
+            self.md_dir = md_files_dir       # 保存当前 PDF 对应的 Markdown 输出目录，供后续使用
             log.info(f"🐶PDF已解析，生成了{len(os.listdir(md_files_dir))}个md文件")
-            self.md_files = get_sorted_md_files(self.md_dir)
+
+            self.md_files = get_sorted_md_files(self.md_dir)    # 获取所有 .md 文件的路径列表（排序） ["F:\\output\\page_1.md", "F:\\output\\page_2.md", "F:\\output\\page_3.md"]
             log.info(f"🐶PDF已解析，生成的MD文件列表：{self.md_files}")
             # 把第一个文件的内容展示出来
             # 读取所有的md文件内容
-            """
+            """最终处理之后的 self.file_contents:
             self.file_contents = {
                 "F:\\output\\example\\page_1.md": "# 标题\n这是第一页内容...",
                 "F:\\output\\example\\page_2.md": "## 第二页\n这里是表格..."
             }
             """
+            # 每次循环，f 就是一个完整的文件路径（字符串）f="F:\\output\\example\\page_1.md",f="F:\\output\\example\\page_2.md"....
             for f in self.md_files:
                 try:
-                    with open(f, 'r', encoding='utf-8') as file:
-                        self.file_contents[f] = file.read()
+                    with open(f, 'r', encoding='utf-8') as file:        # 打开文件 f（比如 page_1.md）file.read()：把整个文件内容读成一个大字符串
+                        self.file_contents[f] = file.read() #   self.file_contents[f] = ...：把这个字符串存到字典里，用文件路径当“钥匙”（key）
                 except Exception as e:
                     print(f"读取文件 {f} 时出错: {e}")
                     self.file_contents[f] = f"读取文件内容时出错: {e}"
+
+            # 根据解析是否成功，动态更新 Gradio 界面上多个组件的状态。
             file_names = [os.path.basename(f) for f in self.md_files]
+
             return [
                 f"🐶解析完成，共 {len(self.md_files)} 个MD文件",  # status
                 gr.Dropdown(choices=file_names, label="MD文件列表", interactive=True),  # file_dropdown 注意下拉列表
@@ -90,6 +100,20 @@ class ProcessorAPP:
                 return "🐶没有找到该文件"
         else:
             return "🐶文件内容加载失败,选择的文件不对"
+
+    def save_to_knowledge(self):
+        """存入知识库"""
+        if not self.md_dir:
+            return "请先解析PDF文件"
+
+        self.splitter = MarkdownDirSplitter(images_output_dir=r'F:\workspace\langgraph_project\Multimodal_RAG\output\images')
+        result = self.splitter.process_md_dir(self.md_dir, self.pdf_path)
+        res: List[Dict] = do_save_to_milvus(result)
+        # 打印结果
+        for i, doc in enumerate(res):
+            print(f"\n文档 #{i + 1}:")
+            print(doc['text'], doc['image_path'])
+        return f"成功存入 {len(res)} 个文档到Milvus"
 
     def create_interface(self):
         """创建一个构建多模态知识库的Gradio界面"""
@@ -130,6 +154,12 @@ class ProcessorAPP:
                 inputs=file_dropdown,          # 下拉框选择 md 文档
                 outputs=content                # 更新Textbox内容
             )
+            save_btn.click(
+                fn=self.save_to_knowledge,
+                inputs=[],
+                outputs=status
+            )
+
 
         return app
 

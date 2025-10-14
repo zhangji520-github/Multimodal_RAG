@@ -41,6 +41,7 @@ if resp_img.status_code == HTTPStatus.OK:
     print(f'前5个值: {json.dumps(embedding[:5], indent=4)}')          # json打印更美观
     print(f'使用tokens: {usage["total_tokens"]}')
     print(f'类型为 {resp_img.output["embeddings"][0]["type"]}')   # image or text or video
+    
 # 视频向量测试 多模态
 print("视频向量测试 多模态")
 video = r"F:\workspace\langgraph_project\Adaptive_RAG\datas\new+video.mp4"

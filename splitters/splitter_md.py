@@ -6,7 +6,7 @@ from PIL import Image
 import io
 from langchain_text_splitters import MarkdownHeaderTextSplitter
 from langchain_experimental.text_splitter import SemanticChunker
-from llm_utils import qwen_embeddings
+from llm_utils import openai_embedding
 from langchain_core.documents import Document
 import re
 import hashlib
@@ -41,7 +41,7 @@ class MarkdownDirSplitter:
 
         # 初始化语义切割器
         self.semantic_splitter = SemanticChunker(
-            qwen_embeddings, 
+            openai_embedding, 
             breakpoint_threshold_type="percentile"
         )
 
@@ -108,7 +108,7 @@ class MarkdownDirSplitter:
         }
     )
     '''
-    def process_image_with_api():
+    def process_image_with_api(self):
         '''使用API处理图片,返回图片的Document列表'''
         pass
 
@@ -208,7 +208,7 @@ class MarkdownDirSplitter:
         按标题分割（#、##、###）→ 得到多个块（每个块带部分标题 metadata）
         提取 Base64 图片：
         保存到 images_output_dir
-        生成图片 Document（page_content=图片路径，metadata.source=当前 md_file）
+        生成图片 Document(page_content=图片路径，metadata.source=当前 md_file)
         原文中的图片替换为 [图片]
         语义分块：长文本按语义切分
             返回该文件的所有 Document 列表
@@ -219,11 +219,11 @@ class MarkdownDirSplitter:
 
 
 if __name__ == "__main__":
-    md_dir = r"F:\workspace\langgraph_project\Multimodal_RAG\output\RBF神经网络无人艇包含控制推导"
+    md_dir = r"F:\workspace\langgraph_project\Multimodal_RAG\output\多无人机多模态协同SLAM数据集构建与验证"
 
     splitter = MarkdownDirSplitter(images_output_dir=r"F:\workspace\langgraph_project\Multimodal_RAG\output\images")
 
-    docs = splitter.process_md_dir(md_dir, source_filename="RBF神经网络无人艇包含控制推导.pdf")
+    docs = splitter.process_md_dir(md_dir, source_filename="多无人机多模态协同SLAM数据集构建与验证.pdf")
 
 
     for i, doc in enumerate(docs):

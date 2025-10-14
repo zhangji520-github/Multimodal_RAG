@@ -150,6 +150,9 @@ class DotsOCRParser:
         bbox=None,
         fitz_preprocess=False,
         ):
+        # 确保目录存在（多进程环境下需要）
+        os.makedirs(save_dir, exist_ok=True)
+
         min_pixels, max_pixels = self.min_pixels, self.max_pixels
         if prompt_mode == "prompt_grounding_ocr":
             min_pixels = min_pixels or MIN_PIXELS  # preprocess image to the final input
