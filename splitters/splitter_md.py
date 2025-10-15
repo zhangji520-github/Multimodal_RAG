@@ -13,6 +13,7 @@ import hashlib
 from typing import List
 from utils.common_utils import get_sorted_md_files
 from utils.log_utils import log
+from bs4 import BeautifulSoup
 
 
 
@@ -116,6 +117,123 @@ class MarkdownDirSplitter:
         """移除所有Base64图片标记"""
         pattern = r'!\[\]\(data:image/(.*?);base64,(.*?)\)'
         return re.sub(pattern, '', text)
+    
+    def convert_html_table_to_markdown(self, html_table: str) -> str:
+        """
+        将单个 HTML 表格转换为 Markdown 格式
+        
+        Args:
+            html_table: HTML 表格字符串
+            
+        Returns:
+            str: Markdown 格式的表格
+        """
+        try:
+            soup = BeautifulSoup(html_table, 'html.parser')
+            table = soup.find('table')
+            
+            if not table:
+                return html_table
+            
+            markdown_lines = []
+            
+            # 处理表头
+            headers = []
+            thead = table.find('thead')
+            if thead:
+                header_row = thead.find('tr')
+                if header_row:
+                    headers = [th.get_text(strip=True) for th in header_row.find_all(['th', 'td'])]
+            
+            # 如果没有 thead，尝试从 tbody 的第一行获取表头
+            if not headers:
+                tbody = table.find('tbody')
+                if tbody:
+                    first_row = tbody.find('tr')
+                    if first_row:
+                        # 检查第一行是否全是 th 标签
+                        ths = first_row.find_all('th')
+                        if ths:
+                            headers = [th.get_text(strip=True) for th in ths]
+                        else:
+                            # 如果第一行是 td，也当作表头处理
+                            headers = [td.get_text(strip=True) for td in first_row.find_all('td')]
+            
+            # 处理表格数据行
+            rows = []
+            tbody = table.find('tbody')
+            if tbody:
+                for tr in tbody.find_all('tr'):
+                    # 如果这一行已经被当作表头了，跳过
+                    if headers and tr == tbody.find('tr') and not thead:
+                        continue
+                    row_data = [td.get_text(strip=True) for td in tr.find_all(['td', 'th'])]
+                    if row_data:  # 只添加非空行
+                        rows.append(row_data)
+            
+            # 如果没有 tbody，直接从 table 获取所有 tr
+            if not rows:
+                for tr in table.find_all('tr'):
+                    # 跳过已经处理过的表头行
+                    if headers and tr.find('th'):
+                        continue
+                    row_data = [td.get_text(strip=True) for td in tr.find_all(['td', 'th'])]
+                    if row_data:
+                        rows.append(row_data)
+            
+            # 构建 Markdown 表格
+            if headers:
+                # 添加表头
+                markdown_lines.append('| ' + ' | '.join(headers) + ' |')
+                # 添加分隔符
+                markdown_lines.append('|' + '|'.join(['---' for _ in headers]) + '|')
+            
+            # 添加数据行
+            for row in rows:
+                # 确保每行的列数与表头一致
+                if headers:
+                    # 补齐或截断列数
+                    while len(row) < len(headers):
+                        row.append('')
+                    row = row[:len(headers)]
+                markdown_lines.append('| ' + ' | '.join(row) + ' |')
+            
+            # 如果表格为空，返回原始 HTML
+            if not markdown_lines:
+                log.warning("⚠️ 表格转换后为空，保留原始 HTML")
+                return html_table
+            
+            return '\n' + '\n'.join(markdown_lines) + '\n'
+            
+        except Exception as e:
+            log.error(f"❌ HTML 表格转换失败: {e}")
+            return html_table  # 转换失败时返回原始 HTML
+    
+    def convert_html_to_markdown(self, text: str) -> str:
+        """
+        将文本中的所有 HTML 表格转换为 Markdown 格式
+        
+        Args:
+            text: 包含 HTML 表格的文本
+            
+        Returns:
+            str: 转换后的文本
+        """
+        # 使用正则表达式查找所有 <table>...</table>
+        def replace_table(match):
+            html_table = match.group(0)
+            markdown_table = self.convert_html_table_to_markdown(html_table)
+            return markdown_table
+        
+        # 使用 re.DOTALL 使 . 匹配包括换行符在内的所有字符
+        converted_text = re.sub(r'<table>.*?</table>', replace_table, text, flags=re.DOTALL | re.IGNORECASE)
+        
+        # 统计转换数量
+        table_count = len(re.findall(r'<table>', text, flags=re.IGNORECASE))
+        if table_count > 0:
+            log.info(f"✅ 成功转换 {table_count} 个 HTML 表格为 Markdown 格式")
+        
+        return converted_text
 
     def process_md_file(self, md_file: str) -> List[Document]:
         """
@@ -124,6 +242,9 @@ class MarkdownDirSplitter:
         """
         with open(md_file, 'r', encoding='utf-8') as file:
             content = file.read()
+        
+        # 0. 将 HTML 表格转换为 Markdown 格式（在所有处理之前）
+        content = self.convert_html_to_markdown(content)
 
         # 1. 按标题结构分割
         split_documents: List[Document] = self.text_splitter.split_text(content)

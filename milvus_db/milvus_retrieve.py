@@ -10,7 +10,7 @@ from milvus_db.milvus_db_with_schema import logger
 from env_utils import COLLECTION_NAME, MILVUS_URI
 
 class MilvusRetriever:
-    def __init__(self, collection_name: str, milvus_client: MilvusClient, top_k: int = 5):
+    def __init__(self, collection_name: str, milvus_client: MilvusClient, top_k: int = 3):
         self.collection_name = collection_name
         self.client: MilvusClient = milvus_client
         self.top_k = top_k
@@ -160,6 +160,6 @@ class MilvusRetriever:
     
 if __name__ == "__main__":
     retrieve = MilvusRetriever(collection_name=COLLECTION_NAME, milvus_client=MilvusClient(uri=MILVUS_URI, user='root', password='Milvus'))
-    docs = retrieve.retrieve("GPT-4’s accuracy scores for a diverse set of languages")
+    docs = retrieve.retrieve("Internal factual eval by category")
     for doc in docs:
         print(doc) 
