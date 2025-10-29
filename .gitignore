@@ -102,3 +102,10 @@ models/
 checkpoints/
 outputs/
 temp/
+
+paddle_ocr_output/
+
+大论文_多智能体系统主动容错控制及其在无人机中的应用.pdf
+DOCUMENT_PROCESSING_FLOW.md
+PADDLEOCR_USAGE.md
+UPGRADE_SUMMARY.md

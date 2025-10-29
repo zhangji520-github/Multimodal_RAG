@@ -7,9 +7,9 @@ from ragas.llms import LangchainLLMWrapper
 from milvus_db.milvus_retrieve import MilvusRetriever
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from typing import List, Dict
-from llm_utils import llm, qwen_embeddings
+from llm_utils import llm, qwen_embeddings, qwen3_max
 from ragas import SingleTurnSample
-from ragas.metrics import LLMContextPrecisionWithoutReference, LLMContextPrecisionWithReference
+from ragas.metrics import LLMContextPrecisionWithoutReference, LLMContextPrecisionWithReference, Faithfulness 
 from env_utils import COLLECTION_NAME, MILVUS_URI
 from pymilvus import MilvusClient
 import asyncio
@@ -78,27 +78,30 @@ class RAGEvaluator:
             reference=reference           # 参考答案(用于评估的基准答案，通常为已知的正确答案) 可选
         )
         
-        # 2.创建精确度评估指标
+        # 2.创建精确度context_precision评估指标
         if reference:
             # 有参考答案
             context_precision = LLMContextPrecisionWithReference(llm=self.evaluator_llm)
         else:
-            # 无参考答案
+            # 无参考答案的context_precision评估指标
             context_precision = LLMContextPrecisionWithoutReference(llm=self.evaluator_llm)
+            # Faithfulness  忠实度指标用于衡量 response 与 retrieved context 之间的事实一致性程度。评分范围从 0 到 1，分数越高表明一致性越好。
+            faithfulness = Faithfulness (llm=self.evaluator_llm)
         
         # 3.评估
         context_precision_score = await context_precision.single_turn_ascore(sample)
+        faithfulness_score = await faithfulness.single_turn_ascore(sample)
         print(f"上下文精确度评估指标: {context_precision_score}")
-    
+        print(f"忠实度评估指标: {faithfulness_score}")
 
 async def main():
-    evaluator_llm = LangchainLLMWrapper(llm)
+    evaluator_llm = LangchainLLMWrapper(qwen3_max)
     evaluator_embedding = LangchainEmbeddingsWrapper(qwen_embeddings)
 
     # 创建RAG evaluator
     rag_evaluator = RAGEvaluator(evaluator_llm, evaluator_embedding)
 
-    question = "In the Contamination data for exam AP Physics 2,GPT-4 (no vision) and GPT-4 get what?"
+    question = "What is the biggest advantage of GPT4 compared with other models?"
     # 检索上下文，从Milvus数据库获取
     m_re = MilvusRetriever(collection_name=COLLECTION_NAME, milvus_client=MilvusClient(uri=MILVUS_URI, user='root', password='Milvus'))
     contexts = m_re.retrieve(question)

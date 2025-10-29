@@ -27,3 +27,6 @@ LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY")
 ## Milvus 配置
 MILVUS_URI = "http://localhost:19530"
 COLLECTION_NAME = "multimodal_rag"
+
+
+PADDLE_OCR_URI = "localhost:8118"

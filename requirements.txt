@@ -11,3 +11,29 @@ frontend
 langchain-text-splitters
 dashscope
 ragas
+
+# PaddleOCR-VL 客户端依赖包
+# 用于连接云端 vLLM 服务进行 OCR 识别
+
+# 核心依赖
+paddlepaddle>=3.2.0
+paddleocr>=3.3.0
+paddlex[ocr]>=3.3.0
+
+
+# 基础依赖（通常会自动安装，但明确列出以确保版本兼容）
+numpy>=2.0.0
+opencv-contrib-python>=4.10.0
+pyyaml>=6.0.0
+requests>=2.32.0
+
+# 数据处理
+pandas>=2.3.0
+shapely>=2.1.0
+
+# 文档处理
+pypdfium2>=4.30.0
+
+# 其他工具
+tqdm>=4.67.0
+psutil>=7.1.0

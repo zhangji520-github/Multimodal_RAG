@@ -20,24 +20,31 @@ def get_filename(file_path, with_extension=True):
 def get_sorted_md_files(input_dir: str) -> List[str]:
     """
     按照页号，把所有的md文件排序。（xx_0.md, xx_1.md, xx_2.md, .... xx_12.md）
-    获取指定目录下所有 .md 文件，并按照 _page_X 中的 X 数值排序
+    获取指定目录下所有 .md 文件（递归查找子目录），并按照数字排序
+    支持两种文件名格式：
+    - _page_X 格式（DotsOCR）
+    - _X 格式（PaddleOCR）
     """
-    # 获取所有 .md 文件（排除 _nohf.md）
-    md_files = [
-        os.path.join(input_dir, f)
-        for f in os.listdir(input_dir)
-        if f.endswith('.md') and not f.endswith('_nohf.md')
-    ]
+    # 递归获取所有 .md 文件（排除 _nohf.md）
+    md_files = []
+    for root, dirs, files in os.walk(input_dir):
+        for f in files:
+            if f.endswith('.md') and not f.endswith('_nohf.md'):
+                md_files.append(os.path.join(root, f))
 
-    # 定义排序 key 函数：提取 _page_ 后的数字
+    # 定义排序 key 函数：提取文件名中的数字
     def sort_key(file_path: str) -> int:
         filename = os.path.basename(file_path)
+        # 优先匹配 _page_X 格式（DotsOCR）
         match = re.search(r'_page_(\d+)', filename)
         if match:
             return int(match.group(1))
-        else:
-            # 如果没有找到数字，则排在最后
-            return float('inf')
+        # 然后匹配 _X.md 格式（PaddleOCR）
+        match = re.search(r'_(\d+)\.md$', filename)
+        if match:
+            return int(match.group(1))
+        # 如果没有找到数字，则排在最后
+        return float('inf')
 
     # 按照数字排序
     sorted_files = sorted(md_files, key=sort_key)

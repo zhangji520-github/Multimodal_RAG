@@ -23,8 +23,6 @@ import time
 import random
 from llm_utils import qwen3_max
 
-
-
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
@@ -66,7 +64,6 @@ class MilvusVectorSave:
         logger.info(f'🐶添加schema完成,共添加{len(schema.fields)}个字段')
 
         # 3 稀疏向量需要的bm25函数
-
         title_bm25_function = Function(
             name = "title_bm25_emb",
             input_field_names=["title"], # 需要进行文本到稀疏向量转换的 VARCHAR 字段名称。
@@ -270,75 +267,75 @@ class MilvusVectorSave:
                 context_prompt = ""
                 if prev_text and next_text:
                     context_prompt = f"""
-你是一位科研论文图像理解专家。请基于论文上下文和图片内容，生成该图片的英文语义描述。
+        你是一位科研论文图像理解专家。请基于论文上下文和图片内容，生成该图片的英文语义描述。
 
-【论文上下文】
-前文：{prev_text}
+        【论文上下文】
+        前文：{prev_text}
 
-后文：{next_text}
+        后文：{next_text}
 
-【任务要求】
-这是一篇科研论文中的图片，请：
-1. **优先参考上下文**：仔细阅读前后文，提取与图片相关的关键信息（如图片标题、图注、实验说明、数据含义等）
-2. **结合图片内容**：观察图片实际展示的内容（图表类型、坐标轴、数据趋势、架构组成等）
-3. **生成语义描述**：将上下文信息与图片内容融合，生成一段完整、准确的描述，使读者无需看图也能理解其含义
-4. **重点说明**：
-   - 如果上下文提到了图号、图题，请包含
-   - 如果是数据图表，说明表达的数据含义和趋势
-   - 如果是架构图/流程图，说明其展示的系统或流程
-   - 如果是实验场景图，说明实验环境和关键要素
-5. 描述长度控制在200-400字
+        【任务要求】
+        这是一篇科研论文中的图片，请：
+        1. **优先参考上下文**：仔细阅读前后文，提取与图片相关的关键信息（如图片标题、图注、实验说明、数据含义等）
+        2. **结合图片内容**：观察图片实际展示的内容（图表类型、坐标轴、数据趋势、架构组成等）
+        3. **生成语义描述**：将上下文信息与图片内容融合，生成一段完整、准确的描述，使读者无需看图也能理解其含义
+        4. **重点说明**：
+        - 如果上下文提到了图号、图题，请包含
+        - 如果是数据图表，说明表达的数据含义和趋势
+        - 如果是架构图/流程图，说明其展示的系统或流程
+        - 如果是实验场景图，说明实验环境和关键要素
+        5. 描述长度控制在200-400字
 
-请直接给出描述，不要有"这张图片..."等前缀。
-                    """
+        请直接给出描述，不要有"这张图片..."等前缀。
+                            """
                 elif prev_text:
                     context_prompt = f"""
-你是一位科研论文图像理解专家。请基于论文上下文和图片内容，生成该图片的英文语义描述。
+        你是一位科研论文图像理解专家。请基于论文上下文和图片内容，生成该图片的英文语义描述。
 
-【论文上下文（前文）】
-{prev_text}
+        【论文上下文（前文）】
+        {prev_text}
 
-【任务要求】
-这是一篇科研论文中的图片，请：
-1. **优先参考前文**：仔细阅读前文，提取与图片相关的关键信息（如图片标题、图注、实验说明等）
-2. **结合图片内容**：观察图片实际展示的内容
-3. **生成语义描述**：将上下文信息与图片内容融合，生成一段完整、准确的描述
-4. **重点说明**：图号、图题、数据含义、架构组成或实验要素
-5. 描述长度控制在200-400字
+        【任务要求】
+        这是一篇科研论文中的图片，请：
+        1. **优先参考前文**：仔细阅读前文，提取与图片相关的关键信息（如图片标题、图注、实验说明等）
+        2. **结合图片内容**：观察图片实际展示的内容
+        3. **生成语义描述**：将上下文信息与图片内容融合，生成一段完整、准确的描述
+        4. **重点说明**：图号、图题、数据含义、架构组成或实验要素
+        5. 描述长度控制在200-400字
 
-请直接给出描述，不要有"这张图片..."等前缀。
-                    """
+        请直接给出描述，不要有"这张图片..."等前缀。
+                            """
                 elif next_text:
                     context_prompt = f"""
-你是一位科研论文图像理解专家。请基于论文上下文和图片内容，生成该图片的英文语义描述。
+        你是一位科研论文图像理解专家。请基于论文上下文和图片内容，生成该图片的英文语义描述。
 
-【论文上下文（后文）】
-{next_text}
+        【论文上下文（后文）】
+        {next_text}
 
-【任务要求】
-这是一篇科研论文中的图片，请：
-1. **优先参考后文**：仔细阅读后文，提取与图片相关的关键信息（如图片说明、结果分析等）
-2. **结合图片内容**：观察图片实际展示的内容
-3. **生成语义描述**：将上下文信息与图片内容融合，生成一段完整、准确的描述
-4. **重点说明**：图号、图题、数据含义、架构组成或实验要素
-5. 描述长度控制在200-400字
+        【任务要求】
+        这是一篇科研论文中的图片，请：
+        1. **优先参考后文**：仔细阅读后文，提取与图片相关的关键信息（如图片说明、结果分析等）
+        2. **结合图片内容**：观察图片实际展示的内容
+        3. **生成语义描述**：将上下文信息与图片内容融合，生成一段完整、准确的描述
+        4. **重点说明**：图号、图题、数据含义、架构组成或实验要素
+        5. 描述长度控制在200-400字
 
-请直接给出描述，不要有"这张图片..."等前缀。
-                    """
+        请直接给出描述，不要有"这张图片..."等前缀。
+                            """
                 else:
                     context_prompt = """
-你是一位科研论文图像理解专家。请观察这张图片并生成英文描述。
+        你是一位科研论文图像理解专家。请观察这张图片并生成英文描述。
 
-【任务要求】
-这是一篇科研论文中的图片，请：
-1. 识别图片类型（数据图表、架构图、流程图、实验场景图等）
-2. 描述图片展示的核心内容和关键信息
-3. 如果是图表，说明坐标轴、数据趋势等
-4. 如果是架构/流程图，说明主要组成部分
-5. 描述长度控制在200-400字
+        【任务要求】
+        这是一篇科研论文中的图片，请：
+        1. 识别图片类型（数据图表、架构图、流程图、实验场景图等）
+        2. 描述图片展示的核心内容和关键信息
+        3. 如果是图表，说明坐标轴、数据趋势等
+        4. 如果是架构/流程图，说明主要组成部分
+        5. 描述长度控制在200-400字
 
-请直接给出描述，不要有"这张图片..."等前缀。
-                    """
+        请直接给出描述，不要有"这张图片..."等前缀。
+                            """
 
                 # 构建多模态消息
                 message = HumanMessage(
@@ -414,21 +411,83 @@ class MilvusVectorSave:
         # 返回处理后的数据
         return processed_data
 
+
+# 便捷函数：用于在其他模块中调用
+def do_save_to_milvus(processed_data: List[Document]) -> List[Dict]:
+    """
+    便捷函数：保存文档到 Milvus
+    
+    Args:
+        processed_data: 处理后的文档列表
+        
+    Returns:
+        保存到 Milvus 的数据列表
+    """
+    milvus_save = MilvusVectorSave()
+    return milvus_save.do_save_to_milvus(processed_data)
+
+
 if __name__ == "__main__":
 
-    # 创建表结构
+    # ==================== 1. 创建 Milvus 集合 ====================
     milvus_vector_save = MilvusVectorSave()
-    milvus_vector_save.create_collection(is_first=True)
+    milvus_vector_save.create_collection(is_first=False)  # 首次运行设置为 True
     
-    # 查看集合信息
+    # 查看集合信息（调试用）
     # client = MilvusClient(uri=MILVUS_URI, user='root', password='Milvus')
     # res = client.describe_collection(collection_name=COLLECTION_NAME)
     # print("集合信息:")
     # print(res)
-    md_dir = r"F:\workspace\langgraph_project\Multimodal_RAG\output\GPT4技术报告"
-    splitter = MarkdownDirSplitter(images_output_dir=r"F:\workspace\langgraph_project\Multimodal_RAG\output\images")
-    docs = splitter.process_md_dir(md_dir, source_filename="GPT4技术报告.pdf")
-
+    
+    # ==================== 2. 选择 OCR 方案 ====================
+    
+    # -------------------- 方案A：DotsOCR（图片+文本，图片有上下文）--------------------
+    # 适用场景：需要保留图片，且图片需要结合上下文生成语义描述
+    # 
+    # DotsOCR 特点：
+    #   ✅ MD 文件中包含 Base64 图片（图片位置在文档流中的正确位置）
+    #   ✅ 图片前后有文本上下文，AI 可以结合上下文生成准确的图片描述
+    #   ✅ 适合学术论文、技术文档（图表需要配合文字说明理解）
+    #   ❌ Base64 图片质量可能较低
+    #
+    # 使用示例：
+    # md_dir = r"F:\workspace\langgraph_project\Multimodal_RAG\output\GPT4技术报告"
+    # splitter = MarkdownDirSplitter(
+    #     images_output_dir=r"F:\workspace\langgraph_project\Multimodal_RAG\output\images"  # Base64 图片解码后保存位置
+    # )
+    # docs = splitter.process_md_dir(md_dir, source_filename="GPT4技术报告.pdf")
+    # 
+    # 生成的 Documents 结构：
+    #   [文本块1] → [文本块2] → [图片1（有前后文）] → [文本块3] → [图片2（有前后文）] → ...
+    # 
+    # res: List[Dict] = milvus_vector_save.do_save_to_milvus(docs)
+    
+    # -------------------- 方案B：PaddleOCR（纯文本，不含图片）--------------------
+    # 适用场景：只需要文本内容（包括公式、表格），不需要保留图片
+    # 
+    # PaddleOCR 特点：
+    #   ✅ OCR 识别精度高（文字、公式、表格）
+    #   ✅ 公式转 LaTeX，表格转 Markdown
+    #   ✅ 生成纯文本 MD 文件（不包含图片）
+    #   ✅ 文件小，处理快，向量化效果好
+    #   ❌ 不保留原始图片（图片中的文字会被识别为文本）
+    #
+    # 使用示例（当前激活）：
+    md_dir = r"F:\workspace\langgraph_project\Multimodal_RAG\paddle_ocr_output\大论文_多智能体系统主动容错控制及其在无人机中的应用"
+    splitter = MarkdownDirSplitter(
+        images_output_dir=r"F:\workspace\langgraph_project\Multimodal_RAG\paddle_ocr_output\images"  # PaddleOCR 的 MD 没有 Base64 图片，此参数无效
+    )
+    docs = splitter.process_md_dir(md_dir, source_filename="多智能体系统主动容错控制及其在无人机中的应用.pdf")
+    # 
+    # 生成的 Documents 结构：
+    #   [文本块1] → [文本块2] → [文本块3] → ...（全是文本，没有图片 Documents）
+    
+    # ==================== 3. 存入 Milvus ====================
+    # 自动完成以下步骤：
+    #   1. Documents → 字典转换（doc_to_dict）
+    #   2. 图片描述生成（generate_image_description，仅针对 category='image' 的条目，PaddleOCR 无图片会跳过）
+    #   3. 向量化（text_content_dense + BM25 sparse）
+    #   4. 批量写入 Milvus
     res: List[Dict] = milvus_vector_save.do_save_to_milvus(docs)
 
     # 打印

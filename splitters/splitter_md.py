@@ -4,8 +4,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import base64
 from PIL import Image
 import io
-from langchain_text_splitters import MarkdownHeaderTextSplitter
-from langchain_experimental.text_splitter import SemanticChunker
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from llm_utils import openai_embedding
 from langchain_core.documents import Document
 import re
@@ -40,10 +39,13 @@ class MarkdownDirSplitter:
             headers_to_split_on=self.headers_to_split_on
         )
 
-        # 初始化语义切割器
-        self.semantic_splitter = SemanticChunker(
-            openai_embedding, 
-            breakpoint_threshold_type="percentile"
+        # 初始化语义切割器（使用 RecursiveCharacterTextSplitter 替代 SemanticChunker）
+        # SemanticChunker 在新版 langchain 中已被移除，使用 RecursiveCharacterTextSplitter 作为替代
+        self.semantic_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.text_chunk_size,
+            chunk_overlap=200,  # 20% 重叠以保持上下文连贯性
+            length_function=len,
+            is_separator_regex=False,
         )
 
     def save_base64_to_Image(self, base64_str: str, output_path: str ) -> None:
@@ -271,7 +273,7 @@ class MarkdownDirSplitter:
             if len(d.page_content) > self.text_chunk_size:
                 final_docs.extend(self.semantic_splitter.split_documents([d]))
             else:
-                final_docs.append(d)
+                final_docs.append(d)        # 否则直接保留原块
 
         # 添加标题层级 用于后续的查询和检索
         return final_docs

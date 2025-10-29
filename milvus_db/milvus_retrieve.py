@@ -10,7 +10,7 @@ from milvus_db.milvus_db_with_schema import logger
 from env_utils import COLLECTION_NAME, MILVUS_URI
 
 class MilvusRetriever:
-    def __init__(self, collection_name: str, milvus_client: MilvusClient, top_k: int = 3):
+    def __init__(self, collection_name: str, milvus_client: MilvusClient, top_k: int = 1):
         self.collection_name = collection_name
         self.client: MilvusClient = milvus_client
         self.top_k = top_k
@@ -76,8 +76,8 @@ class MilvusRetriever:
         self,
         query_dense_embedding,
         query_text,
-        sparse_weight=1.0,
-        dense_weight=1.0,
+        sparse_weight=0.8,
+        dense_weight=1,
         limit=10
     ):
         """
@@ -151,7 +151,7 @@ class MilvusRetriever:
         # return results
 
         docs = []
-        # print(results)
+        print(results)
         for hit in results:
             docs.append({"text": hit.text, "category": hit.category, "filename": hit.filename, "image_path": hit.image_path, "title": hit.title})
 
